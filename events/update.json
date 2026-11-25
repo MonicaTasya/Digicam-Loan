@@ -1,0 +1,5 @@
+{
+  "httpMethod": "PUT",
+  "pathParameters": { "id": "cam-001" },
+  "body": "{\"status\": \"borrowed\", \"borrower\": \"Tasya\"}"
+}

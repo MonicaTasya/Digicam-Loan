@@ -1,0 +1,1 @@
+{ "httpMethod": "DELETE", "pathParameters": { "id": "cam-001" }, "body": null }

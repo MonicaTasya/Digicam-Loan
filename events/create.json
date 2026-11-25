@@ -1,0 +1,5 @@
+{
+  "httpMethod": "POST",
+  "pathParameters": null,
+  "body": "{\"cameraId\": \"cam-001\", \"name\": \"Canon IXUS 185\", \"category\": \"pocket\"}"
+}
