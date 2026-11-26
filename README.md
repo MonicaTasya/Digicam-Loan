@@ -44,15 +44,27 @@ scripts/create_bucket.sh  membuat bucket S3
 docs/deployment-plan.md   langkah deploy ke AWS
 ```
 
-## Deploy
+## Contoh pemakaian (Postman)
 
-Lihat `docs/deployment-plan.md`.
+| No  | Method | URL                              | Body           | Hasil yang diharapkan                        |
+| --- | ------ | -------------------------------- | -------------- | -------------------------------------------- |
+| 1   | POST   | `<FUNCTION_URL>/cameras`         | lihat di bawah | 201, kamera dibuat dengan status `available` |
+| 2   | GET    | `<FUNCTION_URL>/cameras/cam-001` | tidak ada      | 200, detail kamera                           |
+| 3   | PUT    | `<FUNCTION_URL>/cameras/cam-001` | lihat di bawah | 200, status menjadi `borrowed`               |
+| 4   | GET    | `<FUNCTION_URL>/cameras/cam-001` | tidak ada      | 200, status masih `borrowed`                 |
+| 5   | GET    | `<FUNCTION_URL>/cameras/cam-999` | tidak ada      | 404, "kamera tidak ditemukan"                |
+| 6   | DELETE | `<FUNCTION_URL>/cameras/cam-001` | tidak ada      | 200, "cam-001 dihapus"                       |
 
-## Contoh pemakaian
+Body untuk request 1 (POST):
 
-```bash
-curl -X POST $API_URL/cameras -d '{"name":"Canon IXUS 185"}'
-curl $API_URL/cameras/cam-001
-curl -X PUT $API_URL/cameras/cam-001 -d '{"status":"borrowed","borrower":"Nama"}'
-curl -X DELETE $API_URL/cameras/cam-001
+```json
+{ "cameraId": "cam-001", "name": "Canon IXUS 185", "category": "pocket" }
 ```
+
+Body untuk request 3 (PUT):
+
+```json
+{ "status": "borrowed", "borrower": "Nama Peminjam" }
+```
+
+Screenshot hasil tiap request disimpan di `docs/evidence/`.
