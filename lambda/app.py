@@ -13,6 +13,9 @@ import boto3
 from botocore.exceptions import ClientError
 
 BUCKET = os.environ.get("BUCKET_NAME")
+print("DEBUG BUCKET:", BUCKET)
+if not BUCKET:
+    raise RuntimeError("BUCKET_NAME tidak terbaca. Env keys: " + ", ".join(os.environ.keys()))
 s3 = boto3.client("s3")
 
 VALID_STATUS = {"available", "borrowed"}
@@ -108,10 +111,25 @@ def delete_camera(camera_id):
 
 
 def lambda_handler(event, context):
-    method = event.get("httpMethod")
+    # Dukung format API Gateway (httpMethod) dan Function URL (requestContext.http)
+    method = event.get("httpMethod") or (
+        event.get("requestContext", {}).get("http", {}).get("method")
+    )
     camera_id = (event.get("pathParameters") or {}).get("id")
+    raw_path = event.get("rawPath")
+    if not camera_id and raw_path is not None:
+        parts = raw_path.strip("/").split("/")
+        if len(parts) == 2 and parts[0] == "cameras":
+            camera_id = parts[1]
+        elif parts != ["cameras"]:
+            return response(404, {"error": "path tidak ditemukan"})
+
+    raw_body = event.get("body") or "{}"
+    if event.get("isBase64Encoded"):
+        import base64
+        raw_body = base64.b64decode(raw_body).decode("utf-8")
     try:
-        data = json.loads(event.get("body") or "{}")
+        data = json.loads(raw_body)
     except json.JSONDecodeError:
         return response(400, {"error": "body bukan JSON yang valid"})
 
