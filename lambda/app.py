@@ -1,95 +1,109 @@
-"""Lambda handler untuk API peminjaman digicam (CRUD ke DynamoDB).
+"""Lambda handler untuk API peminjaman digicam (CRUD ke S3).
 
+Setiap kamera disimpan sebagai satu file JSON: cameras/<cameraId>.json
 Dipanggil oleh API Gateway (REST API, Lambda proxy integration).
-Event berisi httpMethod, pathParameters, dan body.
 """
 import json
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 
 import boto3
 from botocore.exceptions import ClientError
 
-TABLE_NAME = os.environ.get("TABLE_NAME", "Cameras")
-table = boto3.resource("dynamodb").Table(TABLE_NAME)
+BUCKET = os.environ.get("BUCKET_NAME")
+s3 = boto3.client("s3")
 
 VALID_STATUS = {"available", "borrowed"}
+ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
 def response(status, body):
     return {
         "statusCode": status,
         "headers": {"Content-Type": "application/json"},
-        "body": json.dumps(body, default=str),
+        "body": json.dumps(body),
     }
+
+
+def object_key(camera_id):
+    return f"cameras/{camera_id}.json"
+
+
+def read_camera(camera_id):
+    """Ambil data kamera dari S3. Return None kalau tidak ada."""
+    try:
+        obj = s3.get_object(Bucket=BUCKET, Key=object_key(camera_id))
+        return json.loads(obj["Body"].read())
+    except ClientError as e:
+        if e.response["Error"]["Code"] in ("NoSuchKey", "404"):
+            return None
+        raise
+
+
+def write_camera(item):
+    s3.put_object(
+        Bucket=BUCKET,
+        Key=object_key(item["cameraId"]),
+        Body=json.dumps(item).encode("utf-8"),
+        ContentType="application/json",
+    )
 
 
 def create_camera(data):
     if not data.get("name"):
         return response(400, {"error": "field 'name' wajib diisi"})
+    camera_id = data.get("cameraId") or f"cam-{uuid.uuid4().hex[:8]}"
+    if not ID_PATTERN.match(camera_id):
+        return response(400, {"error": "cameraId hanya boleh huruf, angka, - dan _"})
+    if read_camera(camera_id):
+        return response(409, {"error": "cameraId sudah ada"})
     item = {
-        "cameraId": data.get("cameraId") or f"cam-{uuid.uuid4().hex[:8]}",
+        "cameraId": camera_id,
         "name": data["name"],
         "category": data.get("category", "pocket"),
         "status": "available",
         "borrower": "",
         "borrowedAt": "",
     }
-    table.put_item(Item=item, ConditionExpression="attribute_not_exists(cameraId)")
+    write_camera(item)
     return response(201, item)
 
 
 def get_camera(camera_id):
-    item = table.get_item(Key={"cameraId": camera_id}).get("Item")
+    item = read_camera(camera_id)
     if not item:
         return response(404, {"error": "kamera tidak ditemukan"})
     return response(200, item)
 
 
 def update_camera(camera_id, data):
+    item = read_camera(camera_id)
+    if not item:
+        return response(404, {"error": "kamera tidak ditemukan"})
+
     status = data.get("status")
     if status and status not in VALID_STATUS:
         return response(400, {"error": "status harus 'available' atau 'borrowed'"})
 
-    updates = {k: data[k] for k in ("name", "category", "status", "borrower") if k in data}
-    if status == "borrowed":
-        updates["borrowedAt"] = datetime.now(timezone.utc).isoformat()
-    if status == "available":
-        updates["borrower"] = ""
-        updates["borrowedAt"] = ""
-    if not updates:
+    changes = {k: data[k] for k in ("name", "category", "status", "borrower") if k in data}
+    if not changes:
         return response(400, {"error": "tidak ada field yang diubah"})
-
-    names = {f"#{k}": k for k in updates}
-    values = {f":{k}": v for k, v in updates.items()}
-    expr = "SET " + ", ".join(f"#{k} = :{k}" for k in updates)
-    try:
-        result = table.update_item(
-            Key={"cameraId": camera_id},
-            UpdateExpression=expr,
-            ExpressionAttributeNames=names,
-            ExpressionAttributeValues=values,
-            ConditionExpression="attribute_exists(cameraId)",
-            ReturnValues="ALL_NEW",
-        )
-    except ClientError as e:
-        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
-            return response(404, {"error": "kamera tidak ditemukan"})
-        raise
-    return response(200, result["Attributes"])
+    item.update(changes)
+    if status == "borrowed":
+        item["borrowedAt"] = datetime.now(timezone.utc).isoformat()
+    if status == "available":
+        item["borrower"] = ""
+        item["borrowedAt"] = ""
+    write_camera(item)
+    return response(200, item)
 
 
 def delete_camera(camera_id):
-    try:
-        table.delete_item(
-            Key={"cameraId": camera_id},
-            ConditionExpression="attribute_exists(cameraId)",
-        )
-    except ClientError as e:
-        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
-            return response(404, {"error": "kamera tidak ditemukan"})
-        raise
+    if not read_camera(camera_id):
+        return response(404, {"error": "kamera tidak ditemukan"})
+    s3.delete_object(Bucket=BUCKET, Key=object_key(camera_id))
     return response(200, {"message": f"{camera_id} dihapus"})
 
 
@@ -100,6 +114,9 @@ def lambda_handler(event, context):
         data = json.loads(event.get("body") or "{}")
     except json.JSONDecodeError:
         return response(400, {"error": "body bukan JSON yang valid"})
+
+    if camera_id and not ID_PATTERN.match(camera_id):
+        return response(400, {"error": "format id tidak valid"})
 
     try:
         if method == "POST" and not camera_id:
@@ -112,6 +129,4 @@ def lambda_handler(event, context):
             return delete_camera(camera_id)
         return response(405, {"error": "route tidak didukung"})
     except ClientError as e:
-        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
-            return response(409, {"error": "cameraId sudah ada"})
         return response(500, {"error": "kesalahan server", "detail": str(e)})

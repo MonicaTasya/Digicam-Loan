@@ -8,19 +8,23 @@ Mengelola peminjaman kamera digital: tambah kamera, lihat detail, ubah status (t
 
 ## Arsitektur
 
-Client -> API Gateway -> Lambda (Python) -> DynamoDB. Lambda memakai IAM `LabRole` untuk akses tabel.
+Client -> API Gateway -> Lambda (Python) -> S3. Lambda memakai IAM `LabRole` untuk akses bucket.
 Diagram: `docs/architecture.png` (tambahkan setelah dibuat di draw.io).
 
-## Entitas `Cameras`
+Catatan: penyimpanan memakai S3 karena DynamoDB tidak diizinkan di Learner Lab ini.
 
-| Atribut    | Tipe        | Keterangan                  |
-| ---------- | ----------- | --------------------------- |
-| cameraId   | String (PK) | ID unik, contoh `cam-001`   |
-| name       | String      | Nama kamera                 |
-| category   | String      | pocket / mirrorless / DSLR  |
-| status     | String      | `available` atau `borrowed` |
-| borrower   | String      | Nama peminjam               |
-| borrowedAt | String      | Waktu pinjam (ISO 8601)     |
+## Entitas `Camera`
+
+Disimpan sebagai satu objek JSON per kamera di S3 dengan key `cameras/<cameraId>.json`.
+
+| Atribut    | Tipe   | Keterangan                  |
+| ---------- | ------ | --------------------------- |
+| cameraId   | String | ID unik, contoh `cam-001`   |
+| name       | String | Nama kamera                 |
+| category   | String | pocket / mirrorless / DSLR  |
+| status     | String | `available` atau `borrowed` |
+| borrower   | String | Nama peminjam               |
+| borrowedAt | String | Waktu pinjam (ISO 8601)     |
 
 ## Endpoint
 
@@ -36,7 +40,7 @@ Diagram: `docs/architecture.png` (tambahkan setelah dibuat di draw.io).
 ```
 lambda/app.py             kode handler CRUD
 events/*.json             contoh event untuk test Lambda
-scripts/create_table.sh   membuat tabel DynamoDB
+scripts/create_bucket.sh  membuat bucket S3
 docs/deployment-plan.md   langkah deploy ke AWS
 ```
 
